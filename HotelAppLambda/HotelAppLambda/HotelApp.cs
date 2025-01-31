@@ -5,6 +5,7 @@ using System.Text.Json;
 using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DataModel;
+using Amazon.DynamoDBv2.DocumentModel;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.Core;
 using Amazon.S3;
@@ -18,6 +19,39 @@ namespace HotelAppLambda;
 
 public class HotelApp
 {
+    public async Task<APIGatewayProxyResponse> ListHotels(APIGatewayProxyRequest request, ILambdaContext context)
+    {
+        var response = new APIGatewayProxyResponse()
+        {
+            Headers = new Dictionary<string, string>(),
+            StatusCode = 200
+        };
+        
+        response.Headers.Add("Access-Control-Allow-Origin", "*");
+        response.Headers.Add("Access-Control-Allow-Headers", "*");
+        response.Headers.Add("Access-Control-Allow-Methods", "OPTIONS,GET");
+        response.Headers.Add("Content-Type", "application/json");
+
+        var encodedIdToken = request.Headers["Authorization"];
+        var token = encodedIdToken.StartsWith("Bearer ") ? encodedIdToken.Substring("Bearer ".Length) : encodedIdToken;
+        var idToken = new JwtSecurityToken(token);
+        var userIdClaim = idToken.Claims.FirstOrDefault(s => s.Type == "sub");
+        var userId = userIdClaim?.Value == null ? "defaultUserId" : userIdClaim.Value;
+
+        var region = Environment.GetEnvironmentVariable("AWS_REGION");
+        var dbClient = new AmazonDynamoDBClient(RegionEndpoint.GetBySystemName(region));
+        using var dbContext = new DynamoDBContext(dbClient);
+        
+        // option is to scan or query the ddb, the later is good for large db sets and required an index
+        // for this project, we can just scan
+        var hotels = await dbContext.ScanAsync<Hotel>(new []{new ScanCondition("UserId", ScanOperator.Equal, userId)})
+            .GetRemainingAsync();
+        
+        response.Body = JsonSerializer.Serialize(hotels);
+        
+        return response;
+    }
+
     public async Task<APIGatewayProxyResponse> AddHotel(APIGatewayProxyRequest request, ILambdaContext context)
     {
         var response = new APIGatewayProxyResponse()
