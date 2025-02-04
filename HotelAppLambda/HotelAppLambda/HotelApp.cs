@@ -10,6 +10,8 @@ using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.Core;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.SimpleNotificationService;
+using Amazon.SimpleNotificationService.Model;
 using HotelAppLambda.Models;
 using HttpMultipartParser;
 
@@ -123,6 +125,22 @@ public class HotelApp
             
             using var dbContext = new DynamoDBContext(dbClient);
             await dbContext.SaveAsync(hotel);
+            
+            var mapperConfig = new AutoMapper.MapperConfiguration(cfg =>
+                    cfg.CreateMap<Hotel, HotelCreatedEvent>()
+                        .ForMember(dest => dest.CreationDateTime, opt =>
+                            opt.MapFrom(src => DateTime.Now)) // needed to map something to the uncommon property
+            );
+            var mapper = mapperConfig.CreateMapper();
+            
+            var hotelCreationEvent = mapper.Map<HotelCreatedEvent>(hotel);
+
+            var snsClient = new AmazonSimpleNotificationServiceClient();
+            var publishResponse = await snsClient.PublishAsync(new PublishRequest
+            {
+                TopicArn = Environment.GetEnvironmentVariable("snsTopicArn"),
+                Message = JsonSerializer.Serialize(hotelCreationEvent),
+            });
         }
         catch (Exception e)
         {
@@ -130,6 +148,7 @@ public class HotelApp
             throw;
         }
 
+        response.Body = JsonSerializer.Serialize(new { Message = "Hotel information was stored successfully." });
         return response;
     }
 }
